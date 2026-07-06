@@ -15,4 +15,6 @@ int write_file_data(char filename[10],uint8_t *data,uint32_t size);
 int read_file_data(char filename[10],uint8_t *data,uint32_t *size);
 int flush_master_superblock();
 int create_directory(char dirname[10]);
+int create_nested_file(char *path);
+int create_nested_directory(char *path);
 #endif

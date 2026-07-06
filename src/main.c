@@ -3,6 +3,7 @@
 #include "disk_interface.h"
 #include "filesystem_interface.h"
 #include <string.h>
+#include <stdlib.h>
 int main(void)
 {
     FILE *disk = fopen("disk.img", "r+b");
@@ -26,7 +27,11 @@ int main(void)
     printf("Read size = %u\n",size);
     printf("Read data = %s\n", read);
 
-    
+
     flush_master_superblock();
+    char *path = malloc(100);
+    strcpy(path,"/dir1/dir2/");
+    create_directory("dir1");
+    create_nested_directory(path);
     return 0;
 }

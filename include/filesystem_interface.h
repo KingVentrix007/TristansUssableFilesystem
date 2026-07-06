@@ -12,4 +12,7 @@ uint32_t allocate_blocks(void);
 int write_block(uint32_t block_num,uint8_t data[BLOCK_SIZE]);
 int write_inode(uint32_t inode_num, const Inode *inode);
 int write_file_data(char filename[10],uint8_t *data,uint32_t size);
+int read_file_data(char filename[10],uint8_t *data,uint32_t *size);
+int flush_master_superblock();
+int create_directory(char dirname[10]);
 #endif

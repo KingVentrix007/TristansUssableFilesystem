@@ -376,6 +376,7 @@ int write_file_data(char filename[10],uint8_t *data,uint32_t size)
                 header.generation_number = file_inode.current_generation_number;
                 header.is_old = false;
                 header.block_number = file_inode.num_blocks;
+                header.size = copy_size;
                 DataBlock data_block;
                 data_block.header = header;
                 memcpy(data_block.data, data+offset, copy_size);
@@ -391,6 +392,7 @@ int write_file_data(char filename[10],uint8_t *data,uint32_t size)
                 // write_block(block_id, chunk);
                 // copy_size = store_size-BLOCK_SIZE;
             }
+            file_inode.size = size;
             write_inode(file_inode_index, &file_inode);
             return 0;
 
@@ -400,6 +402,96 @@ int write_file_data(char filename[10],uint8_t *data,uint32_t size)
     }
     return -1;
 }
+
+
+int create_directory(char dirname[10])
+{
+    Inode RootInode;
+    read_inode(0, &RootInode);
+
+    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
+        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
+    }
+    Directory *RootDir = (Directory *)buffer;
+    DirEntry *entry = &RootDir->entries[RootDir->number_of_entries];
+
+    strcpy(entry->name, dirname);
+    uint32_t dir_inode_index = allocate_inode(DIR_INODE);
+    entry->inode_index = dir_inode_index;
+
+    RootDir->number_of_entries++;
+    RootInode.size =
+    sizeof(uint32_t) +
+    RootDir->number_of_entries * sizeof(DirEntry);
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++)
+    {
+        write_block(RootInode.blocks[i],
+                    buffer + i * BLOCK_SIZE);
+    }
+    write_inode(0, &RootInode);
+    Directory NewDir;
+    NewDir.number_of_entries = 0;
+    uint32_t block_id = allocate_blocks();
+    uint8_t blockdata[BLOCK_SIZE];
+    memcpy(blockdata,&NewDir, sizeof(NewDir));
+    write_block(block_id, blockdata);
+    Inode dir_inode;;
+    read_inode(dir_inode_index, &dir_inode);
+    dir_inode.blocks[0] = block_id;
+    dir_inode.file_id = MasterSuperBlock.current_id+1;
+    MasterSuperBlock.current_id++;
+    dir_inode.current_generation_number = 0;
+    dir_inode.size = sizeof(NewDir);
+    dir_inode.num_blocks = 1;
+    dir_inode.start = 's';
+    dir_inode.end = 'e';
+    write_inode(dir_inode_index, &dir_inode);
+
+
+}
+
+int flush_master_superblock()
+{
+    char buf[BLOCK_SIZE];
+    memset(buf,0,BLOCK_SIZE);
+    memcpy(buf, &MasterSuperBlock, sizeof(MasterSuperBlock));
+    write_sector(MountedDisk, 0, buf);
+}
+
+int read_file_data(char filename[10],uint8_t *data,uint32_t *size)
+{
+    Inode RootInode;
+    read_inode(0, &RootInode);
+
+    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);
+    
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
+        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
+    }
+    Directory *RootDir = (Directory *)buffer;
+    for (uint32_t i = 0; i < RootDir->number_of_entries; i++) {
+        DirEntry *entry = &RootDir->entries[i];
+        if(strcmp(entry->name, filename) == 0)
+        {
+            uint32_t file_inode_index = entry->inode_index;
+            Inode file_inode;;
+            read_inode(file_inode_index, &file_inode);
+            uint32_t offset = 0;
+            for (uint32_t bc = 0 ; bc < file_inode.num_blocks; bc++) {
+                DataBlock data_block;
+                read_block(file_inode.blocks[bc], (uint8_t *)&data_block);
+                memcpy(data+offset, data_block.data, data_block.header.size);
+                offset+=sizeof(data_block.data);
+            }
+            *size = file_inode.size;
+            printf("Size == %u\n",*size);
+            return 0;
+        }
+    }
+    return -1;
+}
+
 int create_file(char filename[10])
 {
     // printf("Getting Inode index\n");

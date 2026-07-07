@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "stdbool.h"
 #define  MAGIC 0x54465531
+#define DIR_ENTRY_MAGIC 0x44495231
 #define FREE_INODE 0x1
 #define FILE_INODE 0x2
 #define DIR_INODE 0x3
@@ -68,6 +69,8 @@ typedef struct
 typedef struct
 {
     uint32_t number_of_entries;
+    uint32_t magic;
+    char DirEntryName[10]; //Purely for debugging purposes, not used in the actual filesystem
     DirEntry entries[];
 } Directory;
 

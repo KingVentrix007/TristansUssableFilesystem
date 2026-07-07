@@ -119,6 +119,7 @@ int format_disk(FILE *disk, uint32_t diskSize)
     
     uint32_t block_id = allocate_blocks();
     uint8_t blockdata[BLOCK_SIZE];
+    memset(blockdata,0,BLOCK_SIZE);
     Directory RootDir;
     RootDir.number_of_entries = 0;
     memcpy(blockdata,&RootDir, sizeof(RootDir));
@@ -236,9 +237,11 @@ int write_inode(uint32_t inode_num, const Inode *inode)
                       (inode_num / inodes_per_block);
 
     uint32_t index = inode_num % inodes_per_block;
-
+    // char *string = "write_inode";
     char buf[BLOCK_SIZE];
-
+    // memset(buf,'A',BLOCK_SIZE);
+    // char end_write_buf[BLOCK_SIZE];
+    // memcpy(end_write_buf,string,strlen(string));
     read_sector(MountedDisk, sector, buf);
 
     Inode *inode_table = (Inode *)buf;
@@ -334,6 +337,16 @@ int read_block(uint32_t block_num,uint8_t *data)
     read_sector(MountedDisk, block_sector, data);
 }
 
+
+int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
+{
+
+    
+
+
+
+
+}
 int write_file_data(char filename[10],uint8_t *data,uint32_t size)
 {
     Inode RootInode;
@@ -455,7 +468,7 @@ int create_directory(char dirname[10])
 int create_nested_directory(char *path)
 {
     Inode RootInode; // This is the inital root inode that we will start from
-    uint32_t Current_Inode_index; // This is the current inode that we will be working with as we traverse the path
+    uint32_t Current_Inode_index = 0; // This is the current inode that we will be working with as we traverse the path
     read_inode(0, &RootInode);
     //Get root Dir list
     Directory *CurrentDir = malloc(RootInode.num_blocks*BLOCK_SIZE);
@@ -509,9 +522,16 @@ int create_nested_directory(char *path)
             {
                 if(path_index >= strlen(path)-1)
                 {
+                    printf("path_index == %u\n",path_index);
+                    printf("strlen(path) == %zu\n",strlen(path));
                     //We have reached the end of the path and did not find the dir, so we need to create it
                     DirEntry *new_entry = &CurrentDir->entries[CurrentDir->number_of_entries];
                     strcpy(new_entry->name, current_dir_name_from_path);
+                    if(current_dir_name_from_path[0] == '\0')
+                    {
+                        printf("Error: current_dir_name_from_path is empty\n");
+                        return -1;
+                    }
                     printf("Creating new directory %s\n", current_dir_name_from_path);
                     uint32_t new_dir_inode_index = allocate_inode(DIR_INODE);
                     new_entry->inode_index = new_dir_inode_index;
@@ -526,6 +546,11 @@ int create_nested_directory(char *path)
                     Inode Current_Inode;;
                     read_inode(Current_Inode_index, &Current_Inode);
                     //Write CurrentDir back to disk
+                    CurrentDir->magic = DIR_ENTRY_MAGIC;
+                    char direntryname[10] = {0};
+                    strcpy(direntryname, current_dir_name_from_path);
+                    strcpy(CurrentDir->DirEntryName, current_dir_name_from_path);
+                    printf("Wirte back to disk\n");
                     for (uint32_t i = 0; i < Current_Inode.num_blocks; i++)
                     {
                         write_block(Current_Inode.blocks[i],
@@ -600,76 +625,156 @@ int read_file_data(char filename[10],uint8_t *data,uint32_t *size)
 
 int create_nested_file(char *path)
 {
-    char *token = strtok(path, "/");
-    printf("Creating nested file %s\n",token);
     Inode RootInode;
+    uint32_t Current_Inode_index = 0;
+
     read_inode(0, &RootInode);
 
-    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);
-    
-    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
-        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
-    }
-    while (token != NULL)
+    Directory *CurrentDir = malloc(RootInode.num_blocks * BLOCK_SIZE+10);
+
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++)
     {
-        printf("%s\n", token);
-        
-        Directory *RootDir = (Directory *)buffer;
+        read_block(RootInode.blocks[i],
+                   (uint8_t *)CurrentDir + i * BLOCK_SIZE);
+    }
+
+    char *current_name = malloc(128);
+
+    uint32_t path_index = 0;
+
+    if (path[0] == '/')
+        path_index = 1;
+
+    while (1)
+    {
+        printf("Processing path: %s\n", path + path_index);
+        uint32_t name_index = 0;
+
+        while (path[path_index] != '/' &&
+               path[path_index] != '\0')
+        {
+            current_name[name_index++] = path[path_index++];
+        }
+
+        current_name[name_index] = '\0';
+
         bool found = false;
-        for (uint32_t i = 0; i < RootDir->number_of_entries; i++) {
-            DirEntry *entry = &RootDir->entries[i];
-            if(strcmp(entry->name, token) == 0)
+        printf("CurrentDir = %p\n", (void *)CurrentDir);
+        printf("Entries = %u\n", CurrentDir->number_of_entries);
+        for (uint32_t i = 0; i < CurrentDir->number_of_entries; i++)
+        {
+            DirEntry *entry = &CurrentDir->entries[i];
+
+            if (strcmp(entry->name, current_name) == 0)
             {
-                uint32_t file_inode_index = entry->inode_index;
-                Inode file_inode;;
-                read_inode(file_inode_index, &file_inode);
-                if(file_inode.type == DIR_INODE)
+                /* If this is the final path component then the file
+                   already exists. */
+                if (path[path_index] == '\0')
                 {
-                    uint8_t *dir_buffer = malloc(file_inode.num_blocks*BLOCK_SIZE);
-                    for (uint32_t i = 0; i < file_inode.num_blocks; i++) {
-                        read_block(file_inode.blocks[i], dir_buffer + i * BLOCK_SIZE);
-                    }
-                    found = true;
-                    buffer = dir_buffer;
-                }
-                else
-                {
-                    printf("Error: %s is not a directory\n", token);
+                    printf("File already exists.\n");
                     return -1;
                 }
 
+                Inode inode;
+                read_inode(entry->inode_index, &inode);
+
+                if (inode.type != DIR_INODE)
+                {
+                    printf("%s is not a directory.\n", current_name);
+                    return -1;
+                }
+
+                Directory *NewDir = malloc((inode.num_blocks+1) * BLOCK_SIZE);
+
+                for (uint32_t j = 0; j < inode.num_blocks; j++)
+                {
+                    read_block(inode.blocks[j],
+                               (uint8_t *)NewDir + j * BLOCK_SIZE);
+                }
+
+                free(CurrentDir);
+                CurrentDir = NewDir;
+
+                Current_Inode_index = entry->inode_index;
+
+                path_index++;      // skip '/'
+                found = true;
+                break;
+            }
+        }
+
+        if (found)
+            continue;
+
+        /* Not found */
+        printf("Directory '%s' does not exist.\n", current_name);
+        if (path[path_index] == '\0')
+        {
+            /* This is the filename */
+            printf("Creating new file %s\n", current_name);
+            uint32_t inode_index = allocate_inode(FILE_INODE);
+
+            Inode file_inode;
+            read_inode(inode_index, &file_inode);
+
+            file_inode.file_id = 'Z';
+            file_inode.current_generation_number = 0;
+
+            write_inode(inode_index, &file_inode);
+
+            DirEntry *entry =
+                &CurrentDir->entries[CurrentDir->number_of_entries];
+
+            strcpy(entry->name, current_name);
+            entry->inode_index = inode_index;
+
+            CurrentDir->number_of_entries++;
+
+            Inode parent;
+
+            read_inode(Current_Inode_index, &parent);
+            
+            parent.size =
+                sizeof(uint32_t) +
+                CurrentDir->number_of_entries * sizeof(DirEntry);
+            //List entries in the current directory and write them back to disk
+            for(uint32_t i = 0; i < CurrentDir->number_of_entries; i++)
+            {
+                DirEntry *entry = &CurrentDir->entries[i];
+                printf("Entry %u: %s (inode %u)\n", i, entry->name, entry->inode_index);
+            }
+            printf("parent.num_blocks == %u\n", parent.num_blocks);
+            //Handle parent.num_blocks being 0, which means we need to allocate a new block for the directory
+            if(parent.num_blocks == 0)
+            {
+                uint32_t block_id = allocate_blocks();
+                parent.blocks[0] = block_id;
+                parent.num_blocks = 1;
+            }
+            //Write the current directory back to disk, handle buffer size changes if the number of blocks has changed
+            for (uint32_t i = 0; i < parent.num_blocks; i++)
+            {
+
+                write_block(parent.blocks[i],
+                            (uint8_t *)CurrentDir + i * BLOCK_SIZE);
             }
 
-        }
-        if(found == false){
-            
-            printf("Error: %s not found\n", token);
-            return -1;
-        }
-        token = strtok(NULL, "/");
+            write_inode(Current_Inode_index, &parent);
 
+            free(CurrentDir);
+            free(current_name);
+
+            return 0;
+        }
+
+        printf("Directory '%s' does not exist.\n", current_name);
+
+        free(CurrentDir);
+        free(current_name);
+
+        return -1;
     }
-    Directory *FinalDir = (Directory *)buffer;
-    DirEntry *entry = &FinalDir->entries[FinalDir->number_of_entries];
-    strcpy(entry->name, token);
-    uint32_t file_inode_index = allocate_inode(FILE_INODE);
-    entry->inode_index = file_inode_index;
-    Inode file_inode;;
-    read_inode(file_inode_index, &file_inode);
-    file_inode.file_id = MasterSuperBlock.current_id+1;
-    MasterSuperBlock.current_id++;
-    file_inode.current_generation_number = 0;
-    write_inode(file_inode_index, &file_inode);
-    FinalDir->number_of_entries++;
-    for (uint32_t i = 0; i < RootInode.num_blocks; i++)
-    {
-        write_block(RootInode.blocks[i],
-                    buffer + i * BLOCK_SIZE);
-    }
-    write_inode(0, &RootInode); 
-    return 0;
 }
-
 
 int create_file(char filename[10])
 {

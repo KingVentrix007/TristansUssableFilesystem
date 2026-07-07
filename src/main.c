@@ -31,7 +31,11 @@ int main(void)
     flush_master_superblock();
     char *path = malloc(100);
     strcpy(path,"/dir1/dir2/");
-    create_directory("dir1");
+    // create_directory("dir1");
     create_nested_directory(path);
+    free(path);
+    path = malloc(100);
+    strcpy(path,"/dir1/dir2/file.txt");
+    create_nested_file(path);
     return 0;
 }

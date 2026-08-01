@@ -1,5 +1,6 @@
 #include "disk_interface.h"
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include "stdint.h"
@@ -338,10 +339,177 @@ int read_block(uint32_t block_num,uint8_t *data)
 }
 
 
+size_t get_path_item(char *path,size_t index,char *filename,int *is_last)
+{
+    size_t index_cpy = index;
+    size_t start = index;
+    
+    size_t path_part_pos = 0;
+    while(path[index_cpy] != '/' && index_cpy-start < 127)
+    {
+        filename[path_part_pos] = path[index_cpy];
+        index_cpy++;
+        path_part_pos++;
+    }
+    path_part_pos++;
+    filename[path_part_pos] = '\0';
+    for (size_t i=index_cpy;i< strlen(path); i++) {
+        if(path[i] == '/')
+        {
+            // printf("Hello\n");
+            *is_last=0;
+            printf("get_path_item: %s\n",filename);
+            return  index_cpy;
+        }
+    }
+    *is_last = 1;
+    return  index_cpy;
+    
+    
+}
+
 int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
 {
 
+    char *path_cpy = malloc(strlen(path)+10);
+    strcpy(path_cpy, path);
+    size_t path_string_index = 0;
+    size_t inode_index = 0;
+    if(path[0] == '/')
+    {
+        printf("skip\n");
+        path_string_index = 1;
+    }
+
+    Inode RootInode;
+    read_inode(0, &RootInode);
     
+    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);    
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
+        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
+    }
+    char filename[128];
+    
+    while(path_string_index < strlen(path))
+    {
+        if(path_string_index > strlen(path))
+        {
+            printf("How did this happen\n");
+            return  -2;
+        }
+        bool found = false;
+        size_t filename_index = 0;
+        memset(filename, 0, 128);
+        if(path[path_string_index] == '/')
+        {
+            path_string_index+=1;
+        }
+        while(path[path_string_index] != '/' && path_string_index < strlen(path))
+        {
+            filename[filename_index] = path[path_string_index];
+            filename_index++;
+            path_string_index++;
+        }
+        // printf("filename == [%s]\n",filename);
+        filename[filename_index] = '\0';
+        Directory *CurrentDir = (Directory *)buffer;
+        for (uint32_t i = 0; i < CurrentDir->number_of_entries; i++) 
+        {
+            DirEntry *entry = &CurrentDir->entries[i];
+            printf("Checking entry [%s] against [%s][%zu]\n",entry->name,filename,path_string_index);
+            if(strlen(entry->name) == 0)
+            {
+                printf("Something is wrong\n");
+                printf("Path index == %zu\n",path_string_index);
+                printf("strlen(path) == %zu\n",strlen(path));
+                return -3;
+            }
+            if(strcmp(entry->name, filename) == 0)
+            {
+                printf("Found match for %s\n",filename);
+                Inode EntryInode;
+                read_inode(entry->inode_index, &EntryInode);
+                free(buffer);
+                uint8_t *buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
+                for (uint32_t i = 0; i < EntryInode.num_blocks; i++) {
+                    read_block(EntryInode.blocks[i], buffer + i * BLOCK_SIZE);
+                }
+                found = true;
+                inode_index = entry->inode_index;
+                break;
+
+            }
+            
+
+
+        }
+        if(found == false)
+        {
+            printf("Failed to find file\n");
+            return -1;
+        }
+        else
+        {
+            printf("File: %s\n",filename);
+            printf("Index: %zu\n",path_string_index);
+            if(path_string_index == strlen(path))
+            {
+                uint32_t file_inode_index = inode_index;
+                Inode file_inode;;
+                read_inode(file_inode_index, &file_inode);
+                uint32_t num_blocks_needed = (size/BLOCK_SIZE)+1;
+                uint32_t offset = 0;
+                uint32_t copy_size = 0;
+                uint32_t store_size = size;
+                file_inode.current_generation_number++;
+                DataBlock sizing;
+                if(size > sizeof(sizing.data))
+                {
+                    copy_size = sizeof(sizing.data);
+
+                }
+                else{
+                    copy_size = size;
+                }
+                for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
+                    uint32_t block_id = allocate_blocks();
+                    file_inode.blocks[file_inode.num_blocks] = block_id;
+                    
+                    DataBlockHeader header;
+                    header.file_id = file_inode.file_id;
+                    header.generation_number = file_inode.current_generation_number;
+                    header.is_old = false;
+                    header.block_number = file_inode.num_blocks;
+                    header.size = copy_size;
+                    DataBlock data_block;
+                    data_block.header = header;
+                    memcpy(data_block.data, data+offset, copy_size);
+                    write_block(block_id, (uint8_t *)&data_block);
+                    offset+=copy_size;
+                    copy_size = size-sizeof(data_block.data);
+
+
+
+                    file_inode.num_blocks++;
+                    // uint8_t chunk[BLOCK_SIZE] = {0};
+                    // memcpy(chunk, data+offset,copy_size );
+                    // write_block(block_id, chunk);
+                    // copy_size = store_size-BLOCK_SIZE;
+                }
+                file_inode.size = size;
+                write_inode(file_inode_index, &file_inode);
+                return 0;
+            }
+            // return -99;
+        }
+        
+    
+
+    }
+    return 0;
+    //TODO. Refractor both nested file and nested directory to share a path traversal function, witch should return the inode of the last dir in the path
+    //TODO cont.. then make file will create a file and make dir will create a new dir and its inode.
+    //TODO cont.. DONT forget write_nested_file_data must change the generation number of the file
 
 
 
@@ -416,53 +584,6 @@ int write_file_data(char filename[10],uint8_t *data,uint32_t size)
     return -1;
 }
 
-
-int create_directory(char dirname[10])
-{
-    Inode RootInode;
-    read_inode(0, &RootInode);
-
-    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);
-    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
-        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
-    }
-    Directory *RootDir = (Directory *)buffer;
-    DirEntry *entry = &RootDir->entries[RootDir->number_of_entries];
-
-    strcpy(entry->name, dirname);
-    uint32_t dir_inode_index = allocate_inode(DIR_INODE);
-    entry->inode_index = dir_inode_index;
-
-    RootDir->number_of_entries++;
-    RootInode.size =
-    sizeof(uint32_t) +
-    RootDir->number_of_entries * sizeof(DirEntry);
-    for (uint32_t i = 0; i < RootInode.num_blocks; i++)
-    {
-        write_block(RootInode.blocks[i],
-                    buffer + i * BLOCK_SIZE);
-    }
-    write_inode(0, &RootInode);
-    Directory NewDir;
-    NewDir.number_of_entries = 0;
-    uint32_t block_id = allocate_blocks();
-    uint8_t blockdata[BLOCK_SIZE];
-    memcpy(blockdata,&NewDir, sizeof(NewDir));
-    write_block(block_id, blockdata);
-    Inode dir_inode;;
-    read_inode(dir_inode_index, &dir_inode);
-    dir_inode.blocks[0] = block_id;
-    dir_inode.file_id = MasterSuperBlock.current_id+1;
-    MasterSuperBlock.current_id++;
-    dir_inode.current_generation_number = 0;
-    dir_inode.size = sizeof(NewDir);
-    dir_inode.num_blocks = 1;
-    dir_inode.start = 's';
-    dir_inode.end = 'e';
-    write_inode(dir_inode_index, &dir_inode);
-    return 0;
-
-}
 
 
 int create_nested_directory(char *path)
@@ -571,11 +692,11 @@ int create_nested_directory(char *path)
             }
     }
     
-    //TODO Find the error in this code, i think its the first for loop. coz i dont think its iterating through the path correctly. i think it should be a while loop instead of a for loop. and also the path_index should be incremented inside the while loop. and also the current_dir_name_from_path should be reset to empty string after each iteration of the while loop.
-    //TODO. THAT WAS FLIPPING AI. Okay so i also think i really need to look at the inode/root inode and stop using the AI coz its messing with my thinking
-    //TODO. It needs to. 1. Load RootInode, 2. Load Rootdir. 3. Loop through the path. 4. Check each path part against each entry in the current dir. 5. If it finds a path that matchs, it needs to load the Inode for that entry, then load the dir for that entry, loop through each entires in the new dir. once it reaches the end of the path. [THIS IS WHERE IM UNSuRE]. Next line
+    // TODO Find the error in this code, i think its the first for loop. coz i dont think its iterating through the path correctly. i think it should be a while loop instead of a for loop. and also the path_index should be incremented inside the while loop. and also the current_dir_name_from_path should be reset to empty string after each iteration of the while loop.
+    // TODO. THAT WAS FLIPPING AI. Okay so i also think i really need to look at the inode/root inode and stop using the AI coz its messing with my thinking
+    // TODO. It needs to. 1. Load RootInode, 2. Load Rootdir. 3. Loop through the path. 4. Check each path part against each entry in the current dir. 5. If it finds a path that matchs, it needs to load the Inode for that entry, then load the dir for that entry, loop through each entires in the new dir. once it reaches the end of the path. [THIS IS WHERE IM UNSuRE]. Next line
     // TODO cont.. It either needs to create a new dir entry in the current dir, and then point it to a new inode, and update the current dirs inode data. 
-    //TODO cont... Or it needs to create a new inode, But idk im tired and i hope this makes sense in the morning
+    // TODO cont... Or it needs to create a new inode, But idk im tired and i hope this makes sense in the morning
 
 }
 

@@ -19,11 +19,21 @@ int main(void)
     create_nested_directory(path);
     free(path);
     path = malloc(100);
-    strcpy(path,"/dir1/file.txt");
+    strcpy(path,"/dir1/fileCat.txt");
     printf("Creating nested file %s\n",path);
     create_nested_file(path);
-    char *data_to_write = "Hello from TUF_FS";
-    int write_ret = write_file_data(path, (uint8_t *)data_to_write, strlen(data_to_write));
+    char *data_to_write = "This is a secure text message";
+    int write_ret = write_nested_file_data(path, (uint8_t *)data_to_write, strlen(data_to_write));
+    printf("Write return value %d\n",write_ret);
+    
+    free(path);
+
+
+    strcpy(path,"/dir1/TestingFile.txt");
+    printf("Creating nested file %s\n",path);
+    create_nested_file(path);
+    data_to_write = "Tristan's definitely Usable File System";
+    write_ret = write_nested_file_data(path, (uint8_t *)data_to_write, strlen(data_to_write));
     printf("Write return value %d\n",write_ret);
     return 0;
 }

@@ -18,4 +18,5 @@ int create_directory(char dirname[10]);
 int create_nested_file(char *path);
 int create_nested_directory(char *path);
 int write_nested_file_data(char *path,uint8_t *data,uint32_t size);
+size_t read_nested_file_data(char *path,uint8_t **data);
 #endif

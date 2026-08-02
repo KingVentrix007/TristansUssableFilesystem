@@ -377,6 +377,156 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
     size_t inode_index = 0;
     if(path[0] == '/')
     {
+        path_string_index = 1;
+    }
+
+    Inode RootInode;
+    read_inode(0, &RootInode);
+    
+    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);    
+    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
+        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
+    }
+    char filename[128];
+    
+    while(path_string_index < strlen(path))
+    {
+        if(path_string_index > strlen(path))
+        {
+            printf("How did this happen\n");
+            return  -2;
+        }
+        bool found = false;
+        size_t filename_index = 0;
+        memset(filename, 0, 128);
+        if(path[path_string_index] == '/')
+        {
+            path_string_index+=1;
+        }
+        while(path[path_string_index] != '/' && path_string_index < strlen(path))
+        {
+            filename[filename_index] = path[path_string_index];
+            filename_index++;
+            path_string_index++;
+        }
+        // printf("filename == [%s]\n",filename);
+        filename[filename_index] = '\0';
+        Directory *CurrentDir = (Directory *)buffer;
+        for (uint32_t i = 0; i < CurrentDir->number_of_entries; i++) 
+        {
+            DirEntry *entry = &CurrentDir->entries[i];
+            printf("Checking entry [%s] against [%s]\n",entry->name,filename);
+            if(strlen(entry->name) == 0)
+            {
+                printf("Something is wrong\n");
+                printf("Path index == %zu\n",path_string_index);
+                printf("strlen(path) == %zu\n",strlen(path));
+                return -3;
+            }
+            if(strcmp(entry->name, filename) == 0)
+            {
+                printf("Found match for %s\n",filename);
+                Inode EntryInode;
+                read_inode(entry->inode_index, &EntryInode);
+                free(buffer);
+                uint8_t *buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
+                for (uint32_t i = 0; i < EntryInode.num_blocks; i++) {
+                    read_block(EntryInode.blocks[i], buffer + i * BLOCK_SIZE);
+                }
+                found = true;
+                inode_index = entry->inode_index;
+                break;
+
+            }
+            
+
+
+        }
+        if(found == false)
+        {
+            printf("Failed to find file\n");
+            return -1;
+        }
+        else
+        {
+            
+            if(path_string_index == strlen(path))
+            {
+                
+                uint32_t file_inode_index = inode_index;
+                Inode file_inode;;
+                read_inode(file_inode_index, &file_inode);
+                // printf()
+                printf("File: %s from inode_index: %u\n",filename,file_inode_index);
+                uint32_t num_blocks_needed = (size/BLOCK_SIZE)+1;
+                uint32_t offset = 0;
+                uint32_t copy_size = 0;
+                uint32_t store_size = size;
+                file_inode.current_generation_number++;
+                DataBlock sizing;
+                if(size > sizeof(sizing.data))
+                {
+                    copy_size = sizeof(sizing.data);
+
+                }
+                else{
+                    copy_size = size;
+                }
+                for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
+                    uint32_t block_id = allocate_blocks();
+                    file_inode.blocks[file_inode.num_blocks] = block_id;
+                    
+                    DataBlockHeader header;
+                    header.file_id = file_inode.file_id;
+                    header.generation_number = file_inode.current_generation_number;
+                    header.is_old = false;
+                    header.block_number = file_inode.num_blocks;
+                    header.size = copy_size;
+                    DataBlock data_block;
+                    data_block.header = header;
+                    memcpy(data_block.data, data+offset, copy_size);
+                    write_block(block_id, (uint8_t *)&data_block);
+                    offset+=copy_size;
+                    copy_size = size-sizeof(data_block.data);
+                    printf("Writing data to block id: %u for entry %s(FILE_ID: %u)\n",file_inode.blocks[file_inode.num_blocks],filename, header.file_id);
+
+
+
+                    file_inode.num_blocks++;
+                    // uint8_t chunk[BLOCK_SIZE] = {0};
+                    // memcpy(chunk, data+offset,copy_size );
+                    // write_block(block_id, chunk);
+                    // copy_size = store_size-BLOCK_SIZE;
+                }
+                file_inode.size = size;
+                write_inode(file_inode_index, &file_inode);
+                Inode DebugInode;
+                read_inode(file_inode_index, &DebugInode);
+                return 0;
+            }
+            // return -99;
+        }
+        
+    
+
+    }
+    return 0;
+
+
+
+}
+
+
+
+size_t read_nested_file_data(char *path,uint8_t **data)
+{
+
+    char *path_cpy = malloc(strlen(path)+10);
+    strcpy(path_cpy, path);
+    size_t path_string_index = 0;
+    uint32_t inode_index = 0;
+    if(path[0] == '/')
+    {
         printf("skip\n");
         path_string_index = 1;
     }
@@ -426,16 +576,19 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
             }
             if(strcmp(entry->name, filename) == 0)
             {
-                printf("Found match for %s\n",filename);
+                printf("Found match for %s(entry->inode_index == %u)\n",filename,entry->inode_index);
                 Inode EntryInode;
                 read_inode(entry->inode_index, &EntryInode);
+                inode_index = entry->inode_index;
+                printf("Using inode_index: %u(Should be %u)\n",inode_index,entry->inode_index);
+
                 free(buffer);
                 uint8_t *buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
                 for (uint32_t i = 0; i < EntryInode.num_blocks; i++) {
                     read_block(EntryInode.blocks[i], buffer + i * BLOCK_SIZE);
                 }
                 found = true;
-                inode_index = entry->inode_index;
+                
                 break;
 
             }
@@ -446,59 +599,37 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
         if(found == false)
         {
             printf("Failed to find file\n");
-            return -1;
+            return 0;
         }
         else
         {
-            printf("File: %s\n",filename);
-            printf("Index: %zu\n",path_string_index);
+            // printf("File: %s\n",filename);
+            // 
             if(path_string_index == strlen(path))
             {
-                uint32_t file_inode_index = inode_index;
-                Inode file_inode;;
-                read_inode(file_inode_index, &file_inode);
-                uint32_t num_blocks_needed = (size/BLOCK_SIZE)+1;
-                uint32_t offset = 0;
-                uint32_t copy_size = 0;
-                uint32_t store_size = size;
-                file_inode.current_generation_number++;
-                DataBlock sizing;
-                if(size > sizeof(sizing.data))
-                {
-                    copy_size = sizeof(sizing.data);
-
+                // uint32_t file_inode_index = inode_index;
+                Inode file_inode;
+               
+                read_inode(inode_index, &file_inode);
+                printf("Reading file %s from inode_index: %u\n",filename,inode_index);
+                printf("file_inode.id == %u\n",file_inode.file_id);
+                uint8_t *data_buffer = malloc(file_inode.num_blocks*BLOCK_SIZE);
+                size_t offset = 0;
+                printf("file_inode.num_blocks == %u\n",file_inode.num_blocks);
+                for (size_t x=0; x<file_inode.num_blocks; x++) {
+                    printf("reading block %u\n",file_inode.blocks[x]);
+                    read_block(file_inode.blocks[x],data_buffer+offset);
+                    offset+=BLOCK_SIZE;
+                
                 }
-                else{
-                    copy_size = size;
-                }
-                for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
-                    uint32_t block_id = allocate_blocks();
-                    file_inode.blocks[file_inode.num_blocks] = block_id;
-                    
-                    DataBlockHeader header;
-                    header.file_id = file_inode.file_id;
-                    header.generation_number = file_inode.current_generation_number;
-                    header.is_old = false;
-                    header.block_number = file_inode.num_blocks;
-                    header.size = copy_size;
-                    DataBlock data_block;
-                    data_block.header = header;
-                    memcpy(data_block.data, data+offset, copy_size);
-                    write_block(block_id, (uint8_t *)&data_block);
-                    offset+=copy_size;
-                    copy_size = size-sizeof(data_block.data);
 
-
-
-                    file_inode.num_blocks++;
-                    // uint8_t chunk[BLOCK_SIZE] = {0};
-                    // memcpy(chunk, data+offset,copy_size );
-                    // write_block(block_id, chunk);
-                    // copy_size = store_size-BLOCK_SIZE;
-                }
-                file_inode.size = size;
-                write_inode(file_inode_index, &file_inode);
-                return 0;
+                DataBlock *block;
+                block = (DataBlock*)data_buffer;
+                DataBlockHeader *header;
+                
+                *data = (uint8_t *)block->data;
+                
+                return file_inode.size;
             }
             // return -99;
         }
@@ -507,82 +638,11 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
 
     }
     return 0;
-    //TODO. Refractor both nested file and nested directory to share a path traversal function, witch should return the inode of the last dir in the path
-    //TODO cont.. then make file will create a file and make dir will create a new dir and its inode.
-    //TODO cont.. DONT forget write_nested_file_data must change the generation number of the file
-
 
 
 
 }
-int write_file_data(char filename[10],uint8_t *data,uint32_t size)
-{
-    Inode RootInode;
-    read_inode(0, &RootInode);
 
-    uint8_t *buffer = malloc(RootInode.num_blocks*BLOCK_SIZE);
-    
-    for (uint32_t i = 0; i < RootInode.num_blocks; i++) {
-        read_block(RootInode.blocks[i], buffer + i * BLOCK_SIZE);
-    }
-    Directory *RootDir = (Directory *)buffer;
-    for (uint32_t i = 0; i < RootDir->number_of_entries; i++) {
-        DirEntry *entry = &RootDir->entries[i];
-        printf("Checking entry %s\n",entry->name);
-        if(strcmp(entry->name, filename) == 0)
-        {
-            uint32_t file_inode_index = entry->inode_index;
-            Inode file_inode;;
-            read_inode(file_inode_index, &file_inode);
-            uint32_t num_blocks_needed = (size/BLOCK_SIZE)+1;
-            uint32_t offset = 0;
-            uint32_t copy_size = 0;
-            uint32_t store_size = size;
-            file_inode.current_generation_number++;
-            DataBlock sizing;
-            if(size > sizeof(sizing.data))
-            {
-                copy_size = sizeof(sizing.data);
-
-            }
-            else{
-                copy_size = size;
-            }
-            for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
-                uint32_t block_id = allocate_blocks();
-                file_inode.blocks[file_inode.num_blocks] = block_id;
-                
-                DataBlockHeader header;
-                header.file_id = file_inode.file_id;
-                header.generation_number = file_inode.current_generation_number;
-                header.is_old = false;
-                header.block_number = file_inode.num_blocks;
-                header.size = copy_size;
-                DataBlock data_block;
-                data_block.header = header;
-                memcpy(data_block.data, data+offset, copy_size);
-                write_block(block_id, (uint8_t *)&data_block);
-                offset+=copy_size;
-                copy_size = size-sizeof(data_block.data);
-
-
-
-                file_inode.num_blocks++;
-                // uint8_t chunk[BLOCK_SIZE] = {0};
-                // memcpy(chunk, data+offset,copy_size );
-                // write_block(block_id, chunk);
-                // copy_size = store_size-BLOCK_SIZE;
-            }
-            file_inode.size = size;
-            write_inode(file_inode_index, &file_inode);
-            return 0;
-
-
-
-        }
-    }
-    return -1;
-}
 
 
 

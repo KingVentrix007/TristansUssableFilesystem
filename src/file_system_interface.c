@@ -474,6 +474,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 else{
                     copy_size = size;
                 }
+                printf("num_blocks_needed == %u for %u bytes\n",num_blocks_needed,size);
                 for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
                     uint32_t block_id = allocate_blocks();
                     file_inode.blocks[file_inode.num_blocks] = block_id;
@@ -505,6 +506,22 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 write_inode(file_inode_index, &file_inode);
                 Inode DebugInode;
                 read_inode(file_inode_index, &DebugInode);
+                //Update old blocks
+                for (size_t blok = 0; blok<file_inode.num_blocks; blok+=1) {
+                    uint8_t *block_data = malloc(BLOCK_SIZE+10);
+                    printf("reading block %u\n",file_inode.blocks[blok]);
+                    read_block(file_inode.blocks[blok],block_data);
+                    DataBlock *block = (DataBlock*)block_data;
+                    if(block->header.generation_number != file_inode.current_generation_number)
+                    {
+                        block->header.is_old = true;
+                        write_block(file_inode.blocks[blok], (uint8_t *)block);
+                        free(block_data);
+                        
+                    }
+                    
+                
+                }
                 return 0;
             }
             // return -99;
@@ -631,22 +648,22 @@ size_t read_nested_file_data(char *path,uint8_t **data)
                     }
                     else
                     {
-                        printf("File contains old block\n");
+                        if(block->header.is_old == false)
+                        {
+                            printf("File contains unmarked old block\n");
+                        }
+                        else {
+                            printf("File contains marked old block\n");
+                            
+                        }
+                        
                     }
                     // offset+=BLOCK_SIZE;
                 
                 }
                 
 
-                // DataBlock *block;
-                // block = (DataBlock*)data_buffer;
-                // DataBlockHeader *header;
-                // printf("Read: block->header.generation_number == %u\n",block->header.generation_number);
-                // printf("Read: file_inode.current_generation_number == %u\n",file_inode.current_generation_number);
-                // if(block->header.generation_number != file_inode.current_generation_number)
-                // {
-                //     printf("File versions dont match\n");
-                // }
+
                 
                 
                 *data = (uint8_t *)data_buffer;

@@ -8,16 +8,20 @@
 int main(void)
 {
     FILE *disk = fopen("disk.img", "r+b");
-    int ret = format_disk(disk,2.5e+8);
-    ret = mount(disk);
+    // int ret = format_disk(disk,2.5e+8);
+    mount(disk);
     
 
 
     flush_master_superblock();
     char *path = malloc(100);
+    printf("Create Dir1\n");
     strcpy(path,"/dir1/");
     // create_directory("dir1");
     create_nested_directory(path);
+    printf("Create Dir1 complete\n");
+
+
     free(path);
     path = malloc(100);
     strcpy(path,"/dir1/fileCat.txt");
@@ -30,12 +34,16 @@ int main(void)
     free(path);
 
 
+   
     strcpy(path,"/dir1/TestingFile.txt");
     printf("Creating nested file %s\n",path);
-    create_nested_file(path);
-    data_to_write = "Tristan's definitely Usable File System";
+    // create_nested_file(path);
+
+    printf("\nWriting data to %s\n",path);
+    data_to_write = "LOVE DOGS";
     write_ret = write_nested_file_data(path, (uint8_t *)data_to_write, strlen(data_to_write));
     printf("Write return value %d\n",write_ret);
+    printf("\n\n");
 
 
     printf("\n\nReading data\n\n");

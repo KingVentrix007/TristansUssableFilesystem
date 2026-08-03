@@ -66,6 +66,7 @@ typedef struct
     char data[DataSize];
     uint8_t checksum[32];
 } DataBlock;
+// size_t x = sizeof(DataBlock);
 typedef struct
 {
     uint32_t number_of_entries;

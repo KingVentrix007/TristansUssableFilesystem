@@ -409,13 +409,13 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
             filename_index++;
             path_string_index++;
         }
-        // printf("filename == [%s]\n",filename);
+        printf("filename == [%s]\n",filename);
         filename[filename_index] = '\0';
         Directory *CurrentDir = (Directory *)buffer;
         for (uint32_t i = 0; i < CurrentDir->number_of_entries; i++) 
         {
             DirEntry *entry = &CurrentDir->entries[i];
-            printf("Checking entry [%s] against [%s]\n",entry->name,filename);
+            printf("Checking entry [entry_name:%s] against [Filename:%s]\n",entry->name,filename);
             if(strlen(entry->name) == 0)
             {
                 printf("Something is wrong\n");
@@ -428,13 +428,14 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 printf("Found match for %s\n",filename);
                 Inode EntryInode;
                 read_inode(entry->inode_index, &EntryInode);
+                inode_index = entry->inode_index;
                 free(buffer);
-                uint8_t *buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
+                buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
                 for (uint32_t i = 0; i < EntryInode.num_blocks; i++) {
                     read_block(EntryInode.blocks[i], buffer + i * BLOCK_SIZE);
                 }
                 found = true;
-                inode_index = entry->inode_index;
+                
                 break;
 
             }
@@ -462,6 +463,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 uint32_t offset = 0;
                 uint32_t copy_size = 0;
                 uint32_t store_size = size;
+                printf("Write: file_inode.current_generation_number == %u\n",file_inode.current_generation_number);
                 file_inode.current_generation_number++;
                 DataBlock sizing;
                 if(size > sizeof(sizing.data))
@@ -499,6 +501,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                     // copy_size = store_size-BLOCK_SIZE;
                 }
                 file_inode.size = size;
+                printf("Write: Writing file inode to inode index: %u\n",file_inode_index);
                 write_inode(file_inode_index, &file_inode);
                 Inode DebugInode;
                 read_inode(file_inode_index, &DebugInode);
@@ -583,7 +586,7 @@ size_t read_nested_file_data(char *path,uint8_t **data)
                 printf("Using inode_index: %u(Should be %u)\n",inode_index,entry->inode_index);
 
                 free(buffer);
-                uint8_t *buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
+                buffer = malloc(EntryInode.num_blocks*BLOCK_SIZE);    
                 for (uint32_t i = 0; i < EntryInode.num_blocks; i++) {
                     read_block(EntryInode.blocks[i], buffer + i * BLOCK_SIZE);
                 }
@@ -617,17 +620,36 @@ size_t read_nested_file_data(char *path,uint8_t **data)
                 size_t offset = 0;
                 printf("file_inode.num_blocks == %u\n",file_inode.num_blocks);
                 for (size_t x=0; x<file_inode.num_blocks; x++) {
+                    uint8_t *block_data = malloc(BLOCK_SIZE+10);
                     printf("reading block %u\n",file_inode.blocks[x]);
-                    read_block(file_inode.blocks[x],data_buffer+offset);
-                    offset+=BLOCK_SIZE;
+                    read_block(file_inode.blocks[x],block_data);
+                    DataBlock *block = (DataBlock*)block_data;
+                    if(block->header.generation_number == file_inode.current_generation_number)
+                    {
+                        memcpy(data_buffer+offset, block->data, block->header.size);
+                        offset+=block->header.size;
+                    }
+                    else
+                    {
+                        printf("File contains old block\n");
+                    }
+                    // offset+=BLOCK_SIZE;
                 
                 }
-
-                DataBlock *block;
-                block = (DataBlock*)data_buffer;
-                DataBlockHeader *header;
                 
-                *data = (uint8_t *)block->data;
+
+                // DataBlock *block;
+                // block = (DataBlock*)data_buffer;
+                // DataBlockHeader *header;
+                // printf("Read: block->header.generation_number == %u\n",block->header.generation_number);
+                // printf("Read: file_inode.current_generation_number == %u\n",file_inode.current_generation_number);
+                // if(block->header.generation_number != file_inode.current_generation_number)
+                // {
+                //     printf("File versions dont match\n");
+                // }
+                
+                
+                *data = (uint8_t *)data_buffer;
                 
                 return file_inode.size;
             }
@@ -677,7 +699,7 @@ int create_nested_directory(char *path)
         current_dir_name_from_path[dir_name_index] = '\0';
         for (uint32_t direntry_index =0; direntry_index < CurrentDir->number_of_entries; direntry_index++) {
             DirEntry *entry = &CurrentDir->entries[direntry_index];
-            printf("Checking entry (%u/%u)%s against %s\n", direntry_index, CurrentDir->number_of_entries, entry->name, current_dir_name_from_path);
+            printf("Checking entry (%u/%u)[%s] against [%s]\n", direntry_index, CurrentDir->number_of_entries, entry->name, current_dir_name_from_path);
             if(strcmp(entry->name, current_dir_name_from_path) == 0)
             {
                 //Load inode for this dir entry
@@ -700,56 +722,64 @@ int create_nested_directory(char *path)
             
         }
         if(found_part == false)
+        {
+            if(path_index >= strlen(path)-1)
             {
-                if(path_index >= strlen(path)-1)
+                printf("path_index == %u\n",path_index);
+                printf("strlen(path) == %zu\n",strlen(path));
+                //We have reached the end of the path and did not find the dir, so we need to create it
+                DirEntry *new_entry = &CurrentDir->entries[CurrentDir->number_of_entries];
+                strcpy(new_entry->name, current_dir_name_from_path);
+                if(current_dir_name_from_path[0] == '\0')
                 {
-                    printf("path_index == %u\n",path_index);
-                    printf("strlen(path) == %zu\n",strlen(path));
-                    //We have reached the end of the path and did not find the dir, so we need to create it
-                    DirEntry *new_entry = &CurrentDir->entries[CurrentDir->number_of_entries];
-                    strcpy(new_entry->name, current_dir_name_from_path);
-                    if(current_dir_name_from_path[0] == '\0')
-                    {
-                        printf("Error: current_dir_name_from_path is empty\n");
-                        return -1;
-                    }
-                    printf("Creating new directory %s\n", current_dir_name_from_path);
-                    uint32_t new_dir_inode_index = allocate_inode(DIR_INODE);
-                    new_entry->inode_index = new_dir_inode_index;
-                    CurrentDir->number_of_entries++;
-                    Inode new_dir_inode;;
-                    read_inode(new_dir_inode_index, &new_dir_inode);
-                    new_dir_inode.file_id = MasterSuperBlock.current_id+1;
-                    MasterSuperBlock.current_id++;
-                    new_dir_inode.current_generation_number = 0;
-                    write_inode(new_dir_inode_index, &new_dir_inode);
-                    //TODO. We also need to write the current dir back to disk here. using Current_Inode_index
-                    Inode Current_Inode;;
-                    read_inode(Current_Inode_index, &Current_Inode);
-                    //Write CurrentDir back to disk
-                    CurrentDir->magic = DIR_ENTRY_MAGIC;
-                    char direntryname[10] = {0};
-                    strcpy(direntryname, current_dir_name_from_path);
-                    strcpy(CurrentDir->DirEntryName, current_dir_name_from_path);
-                    printf("Wirte back to disk\n");
-                    for (uint32_t i = 0; i < Current_Inode.num_blocks; i++)
-                    {
-                        write_block(Current_Inode.blocks[i],
-                                    (uint8_t *)CurrentDir + i * BLOCK_SIZE);
-                    }
-                    
-                    return 0;
-
-                    
-                }
-                else
-                {
-                    printf("path_index == %u\n",path_index);
-                    printf("strlen(path) == %zu\n",strlen(path));
-                    printf("Error: %s not found\n", current_dir_name_from_path);
+                    printf("Error: current_dir_name_from_path is empty\n");
                     return -1;
                 }
+                printf("Creating new directory %s\n", current_dir_name_from_path);
+                uint32_t new_dir_inode_index = allocate_inode(DIR_INODE);
+                new_entry->inode_index = new_dir_inode_index;
+                CurrentDir->number_of_entries++;
+                Inode new_dir_inode;;
+                read_inode(new_dir_inode_index, &new_dir_inode);
+                new_dir_inode.file_id = MasterSuperBlock.current_id+1;
+                MasterSuperBlock.current_id++;
+                new_dir_inode.current_generation_number = 0;
+                write_inode(new_dir_inode_index, &new_dir_inode);
+                //TODO. We also need to write the current dir back to disk here. using Current_Inode_index
+                Inode Current_Inode;;
+                read_inode(Current_Inode_index, &Current_Inode);
+                //Write CurrentDir back to disk
+                CurrentDir->magic = DIR_ENTRY_MAGIC;
+                char direntryname[10] = {0};
+                strcpy(direntryname, current_dir_name_from_path);
+                strcpy(CurrentDir->DirEntryName, current_dir_name_from_path);
+                printf("Wirte back to disk\n");
+                for (uint32_t i = 0; i < Current_Inode.num_blocks; i++)
+                {
+                    write_block(Current_Inode.blocks[i],
+                                (uint8_t *)CurrentDir + i * BLOCK_SIZE);
+                }
+                
+                return 0;
+
+                
             }
+            else
+            {
+                printf("path_index == %u\n",path_index);
+                printf("strlen(path) == %zu\n",strlen(path));
+                printf("Error: %s not found\n", current_dir_name_from_path);
+                return -1;
+            }
+        }
+        else
+        {
+            if(path_index >= strlen(path)-1)
+            {
+                printf("Dir [%s] already exists\n",current_dir_name_from_path);
+                return 0;
+            }
+        }
     }
     
     // TODO Find the error in this code, i think its the first for loop. coz i dont think its iterating through the path correctly. i think it should be a while loop instead of a for loop. and also the path_index should be incremented inside the while loop. and also the current_dir_name_from_path should be reset to empty string after each iteration of the while loop.
@@ -1000,3 +1030,6 @@ int create_file(char filename[10])
     
     
 }
+
+
+

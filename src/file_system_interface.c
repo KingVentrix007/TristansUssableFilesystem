@@ -12,6 +12,7 @@
 superblock_t MasterSuperBlock = {0};
 bool FS_mounted = false;
 FILE *MountedDisk = NULL;
+int read_block(uint32_t block_num,uint8_t *data);
 int format_disk(FILE *disk, uint32_t diskSize)
 {
     // (void)disk;   // Remove once you start writing to the disk
@@ -182,6 +183,7 @@ int mount(FILE *disk)
     {
         printf("Supernode correct\n");
         MasterSuperBlock = MainSuperblock;
+        
         MountedDisk = disk;
         FS_mounted = true;
     }
@@ -296,6 +298,36 @@ void write_bit(uint8_t *bitmap, uint32_t bit, bool value)
         clear_bit(bitmap, bit);
 }
 
+
+
+int free_block(uint32_t block)
+{
+    uint32_t read_offset = 0;
+    uint8_t *bitmap = malloc(MasterSuperBlock.total_bitmap_blocks*BLOCK_SIZE);
+    for (uint32_t s = 0; s<MasterSuperBlock.total_bitmap_blocks; s++) {
+        read_sector(MountedDisk, MasterSuperBlock.bitmap_start+s, bitmap+read_offset);
+        read_offset+=BLOCK_SIZE;
+        
+    }
+    bool is_block_used = get_bit(bitmap, block);
+    if(is_block_used == true)
+    {
+        clear_bit(bitmap, block);
+        uint32_t read_offset = 0;
+        for (uint32_t s = 0; s<MasterSuperBlock.total_bitmap_blocks; s++) {
+            write_sector(MountedDisk, MasterSuperBlock.bitmap_start+s, bitmap+read_offset);
+            read_offset+=BLOCK_SIZE;
+            
+        }
+        return 0;
+    }
+    else
+    {
+        printf("Block %u is already free\n",block);
+        return -1;
+    }
+}
+
 uint32_t allocate_blocks(void)
 {
     uint32_t read_offset = 0;
@@ -305,23 +337,62 @@ uint32_t allocate_blocks(void)
         read_offset+=BLOCK_SIZE;
         
     }
+    uint32_t reserve_block = 0;
     for(uint32_t b = 1;b < MasterSuperBlock.total_data_blocks;b++)
     {
         // printf("Checking bit %u\n",b);
         bool is_block_used = get_bit(bitmap, b);
         if(is_block_used == false)
         {
-            set_bit(bitmap, b);
-            uint32_t read_offset = 0;
-            for (uint32_t s = 0; s<MasterSuperBlock.total_bitmap_blocks; s++) {
-                write_sector(MountedDisk, MasterSuperBlock.bitmap_start+s, bitmap+read_offset);
-                read_offset+=BLOCK_SIZE;
-                
+
+
+            uint8_t *block_data = malloc(BLOCK_SIZE+10);
+            read_block(b,block_data);
+            DataBlock *data_block;
+            data_block = (DataBlock *)block_data;
+            if(data_block->header.is_old == true)
+            {
+                reserve_block = b;
             }
+            else
+            {
+                
+                set_bit(bitmap, b);
+                uint32_t read_offset = 0;
+                for (uint32_t s = 0; s<MasterSuperBlock.total_bitmap_blocks; s++) {
+                    write_sector(MountedDisk, MasterSuperBlock.bitmap_start+s, bitmap+read_offset);
+                    read_offset+=BLOCK_SIZE;
+                    
+                }
+            }
+            if (b > MasterSuperBlock.data_start + MasterSuperBlock.total_data_blocks)
+            {
+                printf("Warning: Allocated block %u is beyond the total bitmap blocks %u\n", b, MasterSuperBlock.total_bitmap_blocks);
+                return 0;
+            }
+            printf("Allocating block %u\n",b);
             return b;
         }
     }
-    // printf("Issue\n");
+    if(reserve_block != 0)
+    {
+        set_bit(bitmap, reserve_block);
+        uint32_t read_offset = 0;
+        for (uint32_t s = 0; s<MasterSuperBlock.total_bitmap_blocks; s++) {
+            write_sector(MountedDisk, MasterSuperBlock.bitmap_start+s, bitmap+read_offset);
+            read_offset+=BLOCK_SIZE;
+            
+        }
+        //Zero out the block before returning it
+        write_block(reserve_block, (uint8_t *)malloc(BLOCK_SIZE));
+        return reserve_block;
+    }
+    else
+    {
+        printf("No free blocks available\n");
+        return 0;
+    }
+    printf("Issue\n");
     return 0;
 
 }
@@ -409,7 +480,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
             filename_index++;
             path_string_index++;
         }
-        printf("filename == [%s]\n",filename);
+        // printf("filename == [%s]\n",filename);
         filename[filename_index] = '\0';
         Directory *CurrentDir = (Directory *)buffer;
         for (uint32_t i = 0; i < CurrentDir->number_of_entries; i++) 
@@ -425,7 +496,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
             }
             if(strcmp(entry->name, filename) == 0)
             {
-                printf("Found match for %s\n",filename);
+                // printf("Found match for %s\n",filename);
                 Inode EntryInode;
                 read_inode(entry->inode_index, &EntryInode);
                 inode_index = entry->inode_index;
@@ -458,12 +529,17 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 Inode file_inode;;
                 read_inode(file_inode_index, &file_inode);
                 // printf()
-                printf("File: %s from inode_index: %u\n",filename,file_inode_index);
+                // printf("File: %s from inode_index: %u\n",filename,file_inode_index);
                 uint32_t num_blocks_needed = (size/BLOCK_SIZE)+1;
+                if(num_blocks_needed > MAX_BLOCKS_PER_FILE)
+                {
+                    printf("File is too large\n");
+                    return -1;
+                }
                 uint32_t offset = 0;
                 uint32_t copy_size = 0;
                 uint32_t store_size = size;
-                printf("Write: file_inode.current_generation_number == %u\n",file_inode.current_generation_number);
+                // printf("Write: file_inode.current_generation_number == %u\n",file_inode.current_generation_number);
                 file_inode.current_generation_number++;
                 DataBlock sizing;
                 if(size > sizeof(sizing.data))
@@ -474,16 +550,46 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 else{
                     copy_size = size;
                 }
-                printf("num_blocks_needed == %u for %u bytes\n",num_blocks_needed,size);
+                // printf("num_blocks_needed == %u for %u bytes\n",num_blocks_needed,size);
                 for (uint32_t bc = 0 ; bc < num_blocks_needed; bc++) {
                     uint32_t block_id = allocate_blocks();
+                    if(block_id == 0)
+                    {
+                        printf("Out of blocks\n");
+                        return -1;
+                    }
+                    if(file_inode.num_blocks >= MAX_BLOCKS_PER_FILE)
+                    {
+                        //Loop through the files blocks and reuse old ones
+                        printf("Attempting to reuse old blocks for file %s(FILE_ID: %u)\n",filename,file_inode.file_id);
+                        for(uint32_t files_block_index = 0; files_block_index < file_inode.num_blocks; files_block_index++)
+                        {
+                            uint8_t *block_data = malloc(BLOCK_SIZE+10);
+                            read_block(file_inode.blocks[files_block_index],block_data);
+                            DataBlock *block = (DataBlock*)block_data;
+                            if(block->header.generation_number != file_inode.current_generation_number)
+                            {
+                                // Reuse this block
+                                printf("Reusing old block %u for file %s(FILE_ID: %u)\n",file_inode.blocks[files_block_index],filename, block->header.file_id);
+                                free_block(block_id);
+                                block_id = file_inode.blocks[files_block_index];
+                                //reset block data to zero;
+                                char *zero_data = malloc(BLOCK_SIZE);
+                                memset(zero_data, 0, BLOCK_SIZE);
+                                write_block(block_id, (uint8_t *)zero_data);
+                                free(zero_data);
+                                break;
+                            }
+                        }
+                        // return -1;
+                    }
                     file_inode.blocks[file_inode.num_blocks] = block_id;
                     
                     DataBlockHeader header;
                     header.file_id = file_inode.file_id;
                     header.generation_number = file_inode.current_generation_number;
                     header.is_old = false;
-                    header.block_number = file_inode.num_blocks;
+                    header.block_number = bc;
                     header.size = copy_size;
                     DataBlock data_block;
                     data_block.header = header;
@@ -509,7 +615,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                 //Update old blocks
                 for (size_t blok = 0; blok<file_inode.num_blocks; blok+=1) {
                     uint8_t *block_data = malloc(BLOCK_SIZE+10);
-                    printf("reading block %u\n",file_inode.blocks[blok]);
+                    printf("Reading block %u\n",file_inode.blocks[blok]);
                     read_block(file_inode.blocks[blok],block_data);
                     DataBlock *block = (DataBlock*)block_data;
                     if(block->header.generation_number != file_inode.current_generation_number)
@@ -517,6 +623,7 @@ int write_nested_file_data(char *path,uint8_t *data,uint32_t size)
                         block->header.is_old = true;
                         write_block(file_inode.blocks[blok], (uint8_t *)block);
                         free(block_data);
+
                         
                     }
                     
@@ -547,7 +654,7 @@ size_t read_nested_file_data(char *path,uint8_t **data)
     uint32_t inode_index = 0;
     if(path[0] == '/')
     {
-        printf("skip\n");
+        // printf("skip\n");
         path_string_index = 1;
     }
 
@@ -632,19 +739,25 @@ size_t read_nested_file_data(char *path,uint8_t **data)
                
                 read_inode(inode_index, &file_inode);
                 printf("Reading file %s from inode_index: %u\n",filename,inode_index);
-                printf("file_inode.id == %u\n",file_inode.file_id);
+                // printf("file_inode.id == %u\n",file_inode.file_id);
                 uint8_t *data_buffer = malloc(file_inode.num_blocks*BLOCK_SIZE);
                 size_t offset = 0;
-                printf("file_inode.num_blocks == %u\n",file_inode.num_blocks);
+                // printf("file_inode.num_blocks == %u\n",file_inode.num_blocks);
+                DataBlock ListOfBlocks[MAX_BLOCKS_PER_FILE];
+                uint32_t correct_block_count = 0;
                 for (size_t x=0; x<file_inode.num_blocks; x++) {
                     uint8_t *block_data = malloc(BLOCK_SIZE+10);
-                    printf("reading block %u\n",file_inode.blocks[x]);
+                    // printf("Reading block %u\n",file_inode.blocks[x]);
                     read_block(file_inode.blocks[x],block_data);
                     DataBlock *block = (DataBlock*)block_data;
+                    
+
                     if(block->header.generation_number == file_inode.current_generation_number)
                     {
-                        memcpy(data_buffer+offset, block->data, block->header.size);
-                        offset+=block->header.size;
+                        printf("Reading block %u(Block number: %u) with size %u\n",file_inode.blocks[x],block->header.block_number,block->header.size);
+                        ListOfBlocks[block->header.block_number] = *block;
+                        correct_block_count++;
+                        
                     }
                     else
                     {
@@ -653,12 +766,22 @@ size_t read_nested_file_data(char *path,uint8_t **data)
                             printf("File contains unmarked old block\n");
                         }
                         else {
-                            printf("File contains marked old block\n");
+                            printf("Skipping old block %u with generation number %u\n",file_inode.blocks[x],block->header.generation_number);
                             
                         }
                         
+                        
                     }
                     // offset+=BLOCK_SIZE;
+                
+                }
+                for (uint32_t read_block_index = 0; read_block_index < correct_block_count; read_block_index++) {
+                    
+                    
+                    DataBlock *block_cpy = &ListOfBlocks[read_block_index];
+                    printf("Copying data from block %u\n",block_cpy->header.block_number);
+                    memcpy(data_buffer+offset, block_cpy->data, block_cpy->header.size);
+                    offset+=block_cpy->header.size;
                 
                 }
                 

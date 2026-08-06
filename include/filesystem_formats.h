@@ -8,6 +8,7 @@
 #define FREE_INODE 0x1
 #define FILE_INODE 0x2
 #define DIR_INODE 0x3
+#define MAX_BLOCKS_PER_FILE 12
 enum {
     BLOCK_SIZE = 4096,
     CHECKSUM_SIZE = 8
@@ -34,7 +35,7 @@ typedef struct
 {
     char start;
     uint32_t size;
-    uint32_t blocks[12];
+    uint32_t blocks[MAX_BLOCKS_PER_FILE];
     uint32_t num_blocks;
     uint8_t type;
     uint8_t current_generation_number;

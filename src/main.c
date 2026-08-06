@@ -9,7 +9,7 @@
 int main(void)
 {
     FILE *disk = fopen("disk.img", "r+b");
-    int ret = format_disk(disk,2.5e+8);
+    // int ret = format_disk(disk,2.5e+8);
     mount(disk);
     
 
@@ -25,14 +25,9 @@ int main(void)
 
     free(path);
     path = malloc(100);
-    strcpy(path,"/dir1/fileCat.txt");
-    printf("Creating nested file %s\n",path);
-    create_nested_file(path);
-    // char *data_to_write = "This is a secure text message";
     // int write_ret = write_nested_file_data(path, (uint8_t *)data_to_write, strlen(data_to_write));
     // printf("Write return value %d\n",write_ret);
     
-    free(path);
 
 
    
@@ -41,16 +36,23 @@ int main(void)
     create_nested_file(path);
 
     printf("\nWriting data to %s\n",path);
-    char *data_to_write = "Can you see, that is is imperative that i live to the year 2800. So that i may come back here, kill you, and run away with all my money. I also really like how fish look, taste and smell, but now how they sound, or speak";
     char test_write[(DataSize)*2];
     for (size_t c = 0; c < (DataSize)*2; c++) {
-        test_write[c] = 'C';
+        test_write[c] = 'X';
     
     }
 
     // sizeof(data_to_write);
     int write_ret = write_nested_file_data(path, (uint8_t *)test_write, (DataSize)*2);
     printf("Write return value %d\n",write_ret);
+    if(write_ret == 0)
+    {
+        printf("Write successful\n");
+    }
+    else
+    {
+        printf("Write failed\n");
+    }
     printf("\n\n");
 
 
@@ -59,14 +61,23 @@ int main(void)
     size_t data_size = read_nested_file_data(path, &read_data);
     printf("data_size == %zu\n",data_size);
     char *text = (char *)read_data;
-    printf("Read data = [%s]\n",text+1);
-    for (size_t i=0; i<100; i++) {
-        printf("[%c]",text[i]);
-    }
     printf("\n");
     if(memcmp(test_write,(char *)read_data, (DataSize)*2) == 0)
     {
         printf("Multi block write works\n");
     }
     return 0;
+}
+
+//Proper function for testing
+int test_fs()
+{
+    printf("Please select an option:\n");
+    printf("1. Format disk\n");
+    printf("2. Create nested directory\n");
+    printf("3. Create nested file\n");
+    printf("4. Write data to nested file\n");
+    printf("5. Read data from nested file\n");
+
+
 }
